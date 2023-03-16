@@ -13,4 +13,5 @@ If you find PTTR useful, please consider citing:
 ```
 
 ## Acknowledgement
-This repo builds on top of [P2B](https://github.com/HaozheQi/P2B), Erik Wijmans' pytorch implementation of [PointNet++](https://github.com/erikwijmans/Pointnet2_PyTorch), and [OpenPCDet](https://github.com/open-mmlab/OpenPCDet). We wish to thank their contributions.
+This repo builds on the top of [Open3DSOT](https://github.com/Ghostish/Open3DSOT).
+Thank shanjiayao for his implementation of [PTT](https://github.com/shanjiayao/PTT).
