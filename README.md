@@ -1,7 +1,7 @@
 # Implementation of [AAAI'23 Oral] "GLT-T: Global-Local Transformer Voting for 3D Single Object Tracking in Point Clouds"
 
 ## Citation
-If you find PTTR useful, please consider citing:
+If you find GLT-T useful, please consider citing:
 
 ```bibtex
 @article{nie2022glt,
