@@ -15,6 +15,4 @@ If you find PTTR useful, please consider citing:
 ## Acknowledgement
 This repo builds on the top of [Open3DSOT](https://github.com/Ghostish/Open3DSOT).
 
-Thank shanjiayao for his implementation of [PTT](https://github.com/shanjiayao/PTT).
-
-Thank Jasonkks for his implementation of [PTTR](https://github.com/Jasonkks/PTTR).
+Thank shanjiayao for his implementation of [PTT](https://github.com/shanjiayao/PTT), and Jasonkks for his implementation of [PTTR](https://github.com/Jasonkks/PTTR).
