@@ -57,7 +57,7 @@ To test a trained model (e.g., for the Car category), you must load spedific mod
 python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml --checkpoint ./trained_model/Car_kitti.ckpt --test
 ```
 
-## Visualization
+### Visualization
 Visualization code is integrated into `./models/base_model.py`, you can add `--track` to specific point cloud sequence.
 ```
 python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml --checkpoint ./trained_model/Car_kitti.ckpt --test --track 0/1/2...
