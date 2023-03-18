@@ -58,6 +58,10 @@ python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml --checkpoint ./trained_model/Car_
 ```
 
 ## Visualization
+Visualization code is integrated into `./models/base_model.py`, you can add `--track` to specific point cloud sequence.
+```
+python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml --checkpoint ./trained_model/Car_kitti.ckpt --test --track 0/1/2...
+```
 
 ## Citation
 If you find GLT-T useful, please consider citing: 
