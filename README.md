@@ -39,7 +39,7 @@ NuScenes dataset
     maps	        -	Folder for all map files: rasterized .png images and vectorized .json files.
     v1.0-*	-	JSON tables that include all the meta data and annotations. Each split (trainval, test, mini) is provided in a separate folder.
   ```
->Note: We following [Open3DSOT](https://github.com/Ghostish/Open3DSOT) for dataset setting.
+>Note: We following [Open3DSOT](https://github.com/Ghostish/Open3DSOT) for dataset setting. More details can be referred to it.
 
 ## Quick Start
 ### Training
