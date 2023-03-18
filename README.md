@@ -45,16 +45,16 @@
 ### Training
 To train a model (e.g., for the Car category), you must specify the `.yaml` file with `--cfg` argument.
 ```
-python3.7 main.py  --cfg ./cfgs/Car.yaml
+python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml
 ```
 You can also use `CUDA_VISIBLE_DEVICES` to select specific GPUs.
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 python3.7 main.py  --cfg ./cfgs/Car.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml
 ```
 ### Testing
 To test a trained model (e.g., for the Car category), you must load spedific model with `--checkpoint` and add `--test` flag.
 ```
-python3.7 main.py  --cfg ./cfgs/Car.yaml --checkpoint ./trained_model/Car_kitti.ckpt --test
+python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml --checkpoint ./trained_model/Car_kitti.ckpt --test
 ```
 
 ## Visualization
