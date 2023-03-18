@@ -3,7 +3,7 @@
 ## Introduction
 
 ## Setup
-Installation
+### Installation
 + Create the environment
   ```
   git clone https://github.com/haooozi/GLT-T.git
@@ -15,7 +15,7 @@ Installation
   ```
   pip install -r requirement.txt
   ```
-KITTI dataset
+### KITTI dataset
 + Download the data for [velodyne](http://www.cvlibs.net/download.php?file=data_tracking_velodyne.zip), [calib](http://www.cvlibs.net/download.php?file=data_tracking_calib.zip) and [label_02](http://www.cvlibs.net/download.php?file=data_tracking_label_2.zip) from [KITTI Tracking](http://www.cvlibs.net/datasets/kitti/eval_tracking.php).
 + Unzip the downloaded files.
 + Put the unzipped files under the same folder as following.
@@ -29,7 +29,7 @@ KITTI dataset
       --> [0000-0020] folders with velodynes .bin files
   ```
 
-NuScenes dataset
+### NuScenes dataset
 + Download the dataset from the [download page](https://www.nuscenes.org/download)
 + Extract the downloaded files and make sure you have the following structure:
   ```
@@ -43,11 +43,24 @@ NuScenes dataset
 
 ## Quick Start
 ### Training
-
+To train a model (e.g., for the Car category), you must specify the `.yaml` file with `--cfg` argument.
+```
+python3.7 main.py  --cfg ./cfgs/Car.yaml
+```
+You can also use `CUDA_VISIBLE_DEVICES` to select specific GPUs.
+```
+CUDA_VISIBLE_DEVICES=0,1,2,3 python3.7 main.py  --cfg ./cfgs/Car.yaml
+```
 ### Testing
+To test a trained model (e.g., for the Car category), you must load spedific model with `--checkpoint` and add `--test` flag.
+```
+python3.7 main.py  --cfg ./cfgs/Car.yaml --checkpoint ./trained_model/Car_kitti.ckpt --test
+```
+
+## Visualization
 
 ## Citation
-If you find GLT-T useful, please consider citing:
+If you find GLT-T useful, please consider citing: 
 
 ```bibtex
 @article{nie2022glt,
