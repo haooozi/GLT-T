@@ -658,10 +658,6 @@ class MatchingBaseModel(BaseModel):
         vote_xyz = output["vote_xyz"]
         importances = output['importances']
 
-        maxi_half = data['maxi_half']
-        mini_half = data['mini_half']
-
-
         loss_importances = criterion_imp(importances, seg_label)
         loss_vote = F.smooth_l1_loss(vote_xyz, box_label[:, None, :3].expand_as(vote_xyz), reduction='none')  # B,N,3
         loss_vote = (loss_vote.mean(2) * seg_label * (1 + importances.sigmoid())).sum() / (seg_label.sum() + 1e-06)
