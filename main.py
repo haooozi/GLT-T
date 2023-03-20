@@ -30,7 +30,6 @@ def load_yaml(file_name):
 def parse_config():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=40, help='input batch size')
-    parser.add_argument('--epoch', type=int, default=60, help='number of epochs')
     parser.add_argument('--save_top_k', type=int, default=-1, help='save top k checkpoints')
     parser.add_argument('--check_val_every_n_epoch', type=int, default=1, help='check_val_every_n_epoch')
     parser.add_argument('--workers', type=int, default=0, help='number of data loading workers')
