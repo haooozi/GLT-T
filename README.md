@@ -75,7 +75,7 @@ If you find GLT-T useful, please consider citing:
 @article{nie2022glt,
   title={GLT-T: Global-Local Transformer Voting for 3D Single Object Tracking in Point Clouds},
   author={Nie, Jiahao and He, Zhiwei and Yang, Yuxiang and Gao, Mingyu and Zhang, Jing},
-  journal={arXiv preprint arXiv:2211.10927},
+  booktitle={AAAI},
   year={2022}
 }
 ```
