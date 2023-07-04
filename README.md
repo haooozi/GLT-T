@@ -72,11 +72,14 @@ python3.7 main.py  --cfg ./cfgs/Car_kitti.yaml --checkpoint ./trained_model/Car_
 If you find GLT-T useful, please consider citing: 
 
 ```bibtex
-@article{nie2022glt,
+@inproceedings{nie2023glt,
   title={GLT-T: Global-Local Transformer Voting for 3D Single Object Tracking in Point Clouds},
   author={Nie, Jiahao and He, Zhiwei and Yang, Yuxiang and Gao, Mingyu and Zhang, Jing},
-  booktitle={AAAI},
-  year={2022}
+  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
+  volume={37},
+  number={2},
+  pages={1957--1965},
+  year={2023}
 }
 ```
 
