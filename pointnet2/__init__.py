@@ -15,3 +15,4 @@ except NameError:
 
 if not __POINTNET2_SETUP__:
     from pointnet2 import utils
+    from pointnet2 import models

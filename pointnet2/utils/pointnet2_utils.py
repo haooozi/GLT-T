@@ -1,7 +1,3 @@
-""" PointNet++ utils
-Modified by Zenn
-Date: Feb 2021
-"""
 from __future__ import (
     division,
     absolute_import,
@@ -12,9 +8,23 @@ from __future__ import (
 import torch
 from torch.autograd import Function
 import torch.nn as nn
-from pointnet2.utils import pytorch_utils as pt_utils
+import etw_pytorch_utils as pt_utils
+import sys
 
-import pointnet2_ops._ext as _ext
+try:
+    import builtins
+except:
+    import __builtin__ as builtins
+
+try:
+    import pointnet2._ext as _ext
+except ImportError:
+    if not getattr(builtins, "__POINTNET2_SETUP__", False):
+        raise ImportError(
+            "Could not import _ext module.\n"
+            "Please see the setup instructions in the README: "
+            "https://github.com/erikwijmans/Pointnet2_PyTorch/blob/master/README.rst"
+        )
 
 if False:
     # Workaround for type hints without depending on the `typing` module
@@ -64,7 +74,6 @@ class FurthestPointSampling(Function):
 
 furthest_point_sample = FurthestPointSampling.apply
 
-
 class GatherOperation(Function):
     @staticmethod
     def forward(ctx, features, idx):
@@ -88,7 +97,7 @@ class GatherOperation(Function):
         _, C, N = features.size()
 
         ctx.for_backwards = (idx, C, N)
-
+        ctx.mark_non_differentiable(idx)
         return _ext.gather_points(features, idx)
 
     @staticmethod
@@ -123,6 +132,7 @@ class ThreeNN(Function):
             (B, n, 3) index of 3 nearest neighbors
         """
         dist2, idx = _ext.three_nn(unknown, known)
+        ctx.mark_non_differentiable(idx)
 
         return torch.sqrt(dist2), idx
 
@@ -158,6 +168,7 @@ class ThreeInterpolate(Function):
         n = idx.size(1)
 
         ctx.three_interpolate_for_backward = (idx, weight, m)
+        ctx.mark_non_differentiable(idx)
 
         return _ext.three_interpolate(features, idx, weight)
 
@@ -213,6 +224,7 @@ class GroupingOperation(Function):
         _, C, N = features.size()
 
         ctx.for_backwards = (idx, N)
+        ctx.mark_non_differentiable(idx)
 
         return _ext.group_points(features, idx)
 
@@ -264,10 +276,9 @@ class BallQuery(Function):
         torch.Tensor
             (B, npoint, nsample) tensor with the indicies of the features that form the query balls
         """
-        # return _ext.ball_query(new_xyz, xyz, radius, nsample)
-        inds = _ext.ball_query(new_xyz, xyz, radius, nsample)
-        ctx.mark_non_differentiable(inds)
-        return inds
+        idxs = _ext.ball_query(new_xyz, xyz, radius, nsample)
+        ctx.mark_non_differentiable(idxs)
+        return idxs
 
     @staticmethod
     def backward(ctx, a=None):
@@ -275,6 +286,40 @@ class BallQuery(Function):
 
 
 ball_query = BallQuery.apply
+
+class BallQuery_score(Function):
+    @staticmethod
+    def forward(ctx, radius, nsample, xyz, new_xyz, score):
+        # type: (Any, float, int, torch.Tensor, torch.Tensor) -> torch.Tensor
+        r"""
+
+        Parameters
+        ----------
+        radius : float
+            radius of the balls
+        nsample : int
+            maximum number of features in the balls
+        xyz : torch.Tensor
+            (B, N, 3) xyz coordinates of the features
+        new_xyz : torch.Tensor
+            (B, npoint, 3) centers of the ball query
+
+        Returns
+        -------
+        torch.Tensor
+            (B, npoint, nsample) tensor with the indicies of the features that form the query balls
+        """
+        # return _ext.ball_query_score(new_xyz, xyz, score, radius, nsample)
+        inds = _ext.ball_query_score(new_xyz, xyz, score, radius, nsample)
+        ctx.mark_non_differentiable(inds)
+        return inds
+
+    @staticmethod
+    def backward(ctx, a=None):
+        return None, None, None, None, None
+
+
+ball_query_score = BallQuery_score.apply
 
 
 class QueryAndGroup(nn.Module):
@@ -289,12 +334,10 @@ class QueryAndGroup(nn.Module):
         Maximum number of features to gather in the ball
     """
 
-    def __init__(self, radius, nsample, use_xyz=True, return_idx=False, normalize_xyz=False):
-        # type: (QueryAndGroup, float, int, bool,bool,bool) -> None
+    def __init__(self, radius, nsample, use_xyz=True):
+        # type: (QueryAndGroup, float, int, bool) -> None
         super(QueryAndGroup, self).__init__()
         self.radius, self.nsample, self.use_xyz = radius, nsample, use_xyz
-        self.return_idx = return_idx
-        self.normalize_xyz = normalize_xyz
 
     def forward(self, xyz, new_xyz, features=None):
         # type: (QueryAndGroup, torch.Tensor. torch.Tensor, torch.Tensor) -> Tuple[Torch.Tensor]
@@ -318,8 +361,6 @@ class QueryAndGroup(nn.Module):
         xyz_trans = xyz.transpose(1, 2).contiguous()
         grouped_xyz = grouping_operation(xyz_trans, idx)  # (B, 3, npoint, nsample)
         grouped_xyz -= new_xyz.transpose(1, 2).unsqueeze(-1)
-        if self.normalize_xyz:
-            grouped_xyz /= self.radius
 
         if features is not None:
             grouped_features = grouping_operation(features, idx)
@@ -334,9 +375,67 @@ class QueryAndGroup(nn.Module):
                 self.use_xyz
             ), "Cannot have not features and not use xyz as a feature!"
             new_features = grouped_xyz
-        if self.return_idx:
-            return new_features, idx
+
         return new_features
+
+class QueryAndGroup_score(nn.Module):
+    r"""
+    Groups with a ball query of radius
+
+    Parameters
+    ---------
+    radius : float32
+        Radius of ball
+    nsample : int32
+        Maximum number of features to gather in the ball
+    """
+
+    def __init__(self, radius, nsample, use_xyz=True):
+        # type: (QueryAndGroup, float, int, bool) -> None
+        super(QueryAndGroup_score, self).__init__()
+        self.radius, self.nsample, self.use_xyz = radius, nsample, use_xyz
+
+    def forward(self, xyz, new_xyz,score, features=None):
+        # type: (QueryAndGroup, torch.Tensor. torch.Tensor, torch.Tensor) -> Tuple[Torch.Tensor]
+        r"""
+        Parameters
+        ----------
+        xyz : torch.Tensor
+            xyz coordinates of the features (B, N, 3)
+        new_xyz : torch.Tensor
+            centriods (B, npoint, 3)
+        features : torch.Tensor
+            Descriptors of the features (B, C, N)
+
+        Returns
+        -------
+        new_features : torch.Tensor
+            (B, 3 + C, npoint, nsample) tensor
+        """
+
+        idx = ball_query(self.radius, self.nsample, xyz, new_xyz)
+        unique_score = ball_query_score(self.radius, self.nsample, xyz, new_xyz, score)
+        score_id = unique_score.argmax(dim = 1)
+
+        xyz_trans = xyz.transpose(1, 2).contiguous()
+        grouped_xyz = grouping_operation(xyz_trans, idx)  # (B, 3, npoint, nsample)
+        grouped_xyz -= new_xyz.transpose(1, 2).unsqueeze(-1)
+
+        if features is not None:
+            grouped_features = grouping_operation(features, idx)
+            if self.use_xyz:
+                new_features = torch.cat(
+                    [grouped_xyz, grouped_features], dim=1
+                )  # (B, C + 3, npoint, nsample)
+            else:
+                new_features = grouped_features
+        else:
+            assert (
+                self.use_xyz
+            ), "Cannot have not features and not use xyz as a feature!"
+            new_features = grouped_xyz
+
+        return new_features, score_id
 
 
 class GroupAll(nn.Module):
@@ -383,20 +482,3 @@ class GroupAll(nn.Module):
             new_features = grouped_xyz
 
         return new_features
-
-
-def knn_point(k, points1, points2):
-    """
-    find for each point in points1 the knn in points2
-    Args:
-        k: k for kNN
-        points1: B x npoint1 x d
-        points2: B x npoint2 x d
-
-    Returns:
-        top_k_neareast_idx: (batch_size, npoint1, k) int32 array, indices to input points
-    """
-    dist_matrix = torch.cdist(points1, points2)  # B, npoint1, npoint2
-    top_k_neareast_idx = torch.argsort(dist_matrix, dim=-1)[:, :, :k]  # B, npoint1, K
-    top_k_neareast_idx = top_k_neareast_idx.int().contiguous()
-    return top_k_neareast_idx

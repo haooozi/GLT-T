@@ -1,7 +1,3 @@
-""" PointNet++ Layers
-Modified by Zenn
-Date: Feb 2021
-"""
 from __future__ import (
     division,
     absolute_import,
@@ -12,13 +8,15 @@ from __future__ import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pointnet2.utils import pytorch_utils as pt_utils
+import etw_pytorch_utils as pt_utils
 
 from pointnet2.utils import pointnet2_utils
+
 
 if False:
     # Workaround for type hints without depending on the `typing` module
     from typing import *
+
 
 def calc_square_dist(a, b, return_cos=False):
     """
@@ -26,21 +24,19 @@ def calc_square_dist(a, b, return_cos=False):
     a: [bs, c, n]
     b: [bs, c, m]
     """
-    # print(a.shape) #(1,128,384)
-    # print(b.shape) #(1,128,256)
-    a = a.transpose(1, 2) #(1,384,128)
-    b = b.transpose(1, 2) #(1,256,128)
-    n = a.shape[1] #(384)
-    m = b.shape[1] #(256)
-    num_channel = a.shape[-1] #(128)
-    a_square = a.unsqueeze(dim=2)  # [bs, n, 1, c] (1,384,1,128)
-    b_square = b.unsqueeze(dim=1)  # [bs, 1, m, c] (1,1,256,128)
-    a_square = torch.sum(a_square * a_square, dim=-1)  # [bs, n, 1] (1,384,1)
-    b_square = torch.sum(b_square * b_square, dim=-1)  # [bs, 1, m] (1,1,256)
-    a_square = a_square.repeat((1, 1, m))  # [bs, n, m] #(1,384,256)
-    b_square = b_square.repeat((1, n, 1))  # [bs, n, m] #(1,384,256)
+    a = a.transpose(1, 2)
+    b = b.transpose(1, 2)
+    n = a.shape[1]
+    m = b.shape[1]
+    num_channel = a.shape[-1]
+    a_square = a.unsqueeze(dim=2)  # [bs, n, 1, c]
+    b_square = b.unsqueeze(dim=1)  # [bs, 1, m, c]
+    a_square = torch.sum(a_square * a_square, dim=-1)  # [bs, n, 1]
+    b_square = torch.sum(b_square * b_square, dim=-1)  # [bs, 1, m]
+    a_square = a_square.repeat((1, 1, m))  # [bs, n, m]
+    b_square = b_square.repeat((1, n, 1))  # [bs, n, m]
 
-    coor = torch.matmul(a, b.transpose(1, 2))  # [bs, n, m] #(1,384,256)
+    coor = torch.matmul(a, b.transpose(1, 2))  # [bs, n, m]
 
     if not return_cos:
         dist = a_square + b_square - 2.0 * coor  # [bs, npoint, ndataset]
@@ -50,21 +46,23 @@ def calc_square_dist(a, b, return_cos=False):
 
 
 class _PointnetSAModuleBase(nn.Module):
-    def __init__(self, use_fps=False):
+    def __init__(self, sample_method=None):
         super(_PointnetSAModuleBase, self).__init__()
         self.groupers = None
         self.mlps = None
-        self.use_fps = use_fps
+        self.sample_method = sample_method
 
-    def forward(self, xyz, features, npoint, return_idx=False, target_feature=None):
-        # modified to return sample idxs
+    def forward(self, xyz, features, npoint,
+                target_feature=None,
+                keep_first_half=False):
+        # type: (_PointnetSAModuleBase, torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
         r"""
         Parameters
         ----------
         xyz : torch.Tensor
             (B, N, 3) tensor of the xyz coordinates of the features
         features : torch.Tensor
-            (B, C, N) tensor of the descriptors of the the features
+            (B, N, C) tensor of the descriptors of the the features
 
         Returns
         -------
@@ -73,13 +71,11 @@ class _PointnetSAModuleBase(nn.Module):
         new_features : torch.Tensor
             (B,  \sum_k(mlps[k][-1]), npoint) tensor of the new_features descriptors
         """
-
         self.npoint = npoint
         new_features_list = []
 
         xyz_flipped = xyz.transpose(1, 2).contiguous()
 
-        # print(target_feature)
         if target_feature is not None:
             assert features is not None
             with torch.no_grad():
@@ -98,20 +94,27 @@ class _PointnetSAModuleBase(nn.Module):
         else:
             npoint = self.npoint
 
-        if target_feature is not None:
-            idx = torch.arange(npoint).repeat(xyz.size(0), 1).int().cuda()
-            sample_idxs = torch.cat([idx, target_idx], dim=-1)
-
-        elif self.use_fps:
-            sample_idxs = pointnet2_utils.furthest_point_sample(xyz, npoint)
+        if self.sample_method is None:
+            if keep_first_half:
+                idx0 =  torch.arange(npoint // 2).repeat(
+                    xyz.size(0), 1).int().cuda()
+                idx1 =  torch.arange(npoint - npoint // 2).repeat(
+                    xyz.size(0), 1).int().cuda() + xyz.shape[1] // 2
+                idx = torch.cat([idx0, idx1], dim=1)
+            else:
+                idx = torch.arange(npoint).repeat(xyz.size(0), 1).int().cuda()
+        elif self.sample_method == 'fps':
+            idx = pointnet2_utils.furthest_point_sample(xyz, npoint)
         else:
-            sample_idxs = torch.arange(npoint).repeat(xyz.size(0), 1).int().cuda()
+            raise ValueError()
+
+        if target_feature is not None:
+            idx = torch.cat([idx, target_idx], dim=-1)
 
         new_xyz = (
-            pointnet2_utils.gather_operation(xyz_flipped, sample_idxs)
-                .transpose(1, 2)
-                .contiguous()
-        )
+            pointnet2_utils.gather_operation(xyz_flipped, idx)
+            .transpose(1, 2)
+            .contiguous())
 
         for i in range(len(self.groupers)):
             new_features = self.groupers[i](
@@ -125,10 +128,8 @@ class _PointnetSAModuleBase(nn.Module):
             new_features = new_features.squeeze(-1)  # (B, mlp[-1], npoint)
 
             new_features_list.append(new_features)
-        if return_idx:
-            return new_xyz, torch.cat(new_features_list, dim=1), sample_idxs
-        else:
-            return new_xyz, torch.cat(new_features_list, dim=1)
+
+        return new_xyz, torch.cat(new_features_list, dim=1), idx
 
 
 class PointnetSAModuleMSG(_PointnetSAModuleBase):
@@ -148,10 +149,10 @@ class PointnetSAModuleMSG(_PointnetSAModuleBase):
         Use batchnorm
     """
 
-    def __init__(self, radii, nsamples, mlps, bn=True, use_xyz=True, use_fps=False, normalize_xyz=False):
-        # type: (PointnetSAModuleMSG, List[float],List[int], List[List[int]], bool, bool,bool) -> None
-        super(PointnetSAModuleMSG, self).__init__(use_fps=use_fps)
-
+    def __init__(self, radii, nsamples, mlps, bn=True,
+                 use_xyz=True, vote=False, sample_method=None):
+        # type: (PointnetSAModuleMSG, int, List[float], List[int], List[List[int]], bool, bool) -> None
+        super(PointnetSAModuleMSG, self).__init__(sample_method=sample_method)
         assert len(radii) == len(nsamples) == len(mlps)
 
         self.groupers = nn.ModuleList()
@@ -159,15 +160,28 @@ class PointnetSAModuleMSG(_PointnetSAModuleBase):
         for i in range(len(radii)):
             radius = radii[i]
             nsample = nsamples[i]
-            self.groupers.append(
-                pointnet2_utils.QueryAndGroup(radius, nsample, use_xyz=use_xyz, normalize_xyz=normalize_xyz))
+            if vote is False:
+                self.groupers.append(
+                pointnet2_utils.QueryAndGroup(radius, nsample, use_xyz=use_xyz))
+            else:
+                self.groupers.append(
+                pointnet2_utils.QueryAndGroup_score(radius, nsample, use_xyz=use_xyz))
 
             mlp_spec = mlps[i]
             if use_xyz:
                 mlp_spec[0] += 3
+
             self.mlps.append(pt_utils.SharedMLP(mlp_spec, bn=bn))
 
-
+            # """---------------------------"""
+            # for m in self.mlps.modules():
+            #     if isinstance(m, nn.Conv2d):
+            #         nn.init.kaiming_normal_(m.weight.data, mode='fan_in')
+            #         if m.bias is not None:
+            #             m.bias.data.zero_()
+            #     elif isinstance(m, nn.BatchNorm2d):
+            #         m.weight.data.uniform_()
+            #         m.bias.data.zero_()
 
 class PointnetSAModule(PointnetSAModuleMSG):
     r"""Pointnet set abstrction layer
@@ -187,18 +201,112 @@ class PointnetSAModule(PointnetSAModuleMSG):
     """
 
     def __init__(
-            self, mlp, radius=None, nsample=None, bn=True, use_xyz=True, use_fps=False, normalize_xyz=False
+        self, mlp, radius=None, nsample=None,
+        bn=True, use_xyz=True, sample_method=None
     ):
-        # type: (PointnetSAModule, List[int], float, int, bool, bool, bool,bool) -> None
+        # type: (PointnetSAModule, List[int], int, float, int, bool, bool) -> None
         super(PointnetSAModule, self).__init__(
             mlps=[mlp],
             radii=[radius],
             nsamples=[nsample],
             bn=bn,
             use_xyz=use_xyz,
-            use_fps=use_fps,
-            normalize_xyz=normalize_xyz
+            sample_method=sample_method,
         )
+
+
+class PointnetProposalModule(PointnetSAModuleMSG):
+    r"""Pointnet set abstrction layer
+
+    Parameters
+    ----------
+    npoint : int
+        Number of features
+    radius : float
+        Radius of ball
+    nsample : int
+        Number of samples in the ball query
+    mlp : list
+        Spec of the pointnet before the global max_pool
+    bn : bool
+        Use batchnorm
+    """
+
+    def __init__(
+        self, mlp, radius=None, nsample=None, bn=True,
+        use_xyz=True, vote=True, sample_method=None
+    ):
+        # type: (PointnetSAModule, List[int], int, float, int, bool, bool) -> None
+        super(PointnetProposalModule, self).__init__(
+            mlps=[mlp],
+            radii=[radius],
+            nsamples=[nsample],
+            bn=bn,
+            use_xyz=use_xyz,
+            vote = vote,
+            sample_method=sample_method
+        )
+
+
+    def forward(self, xyz, features, npoint, score):
+        # type: (_PointnetSAModuleBase, torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+        r"""
+        Parameters
+        ----------
+        xyz : torch.Tensor
+            (B, N, 3) tensor of the xyz coordinates of the features
+        features : torch.Tensor
+            (B, N, C) tensor of the descriptors of the the features
+
+        Returns
+        -------
+        new_xyz : torch.Tensor
+            (B, npoint, 3) tensor of the new features' xyz
+        new_features : torch.Tensor
+            (B,  \sum_k(mlps[k][-1]), npoint) tensor of the new_features descriptors
+        """
+
+        self.npoint = npoint
+        new_features_list = []
+
+        xyz_flipped = xyz.transpose(1, 2).contiguous()
+        
+        if self.sample_method is None:
+            new_xyz = (
+                pointnet2_utils.gather_operation(
+                    xyz_flipped,torch.arange(self.npoint).repeat(xyz.size(0),1).int().cuda()
+                )
+                .transpose(1, 2)
+                .contiguous())
+        else:
+            new_xyz = (
+                pointnet2_utils.gather_operation(
+                    xyz_flipped, pointnet2_utils.furthest_point_sample(xyz, self.npoint)
+                )
+                .transpose(1, 2)
+                .contiguous())
+
+        for i in range(len(self.groupers)):
+            new_features, score_id = self.groupers[i](
+                xyz, new_xyz, score, features
+            )  # (B, C, npoint, nsample)
+            idx = torch.arange(new_features.size(0))
+            new_features = new_features[idx,:,score_id,:]
+            #B*C*nsample
+            new_features = new_features.unsqueeze(2)
+            #B*C*1*nsample
+            new_xyz = new_xyz[idx,score_id,:]
+            #B*3
+
+            new_features = self.mlps[i](new_features)  # (B, mlp[-1], npoint, nsample)
+            new_features = F.max_pool2d(
+                new_features, kernel_size=[1, new_features.size(3)]
+            )  # (B, mlp[-1], npoint, 1)
+            new_features = new_features.squeeze(-1).squeeze(-1)  # (B, mlp[-1])
+
+            new_features_list.append(new_features)
+
+        return new_xyz, torch.cat(new_features_list, dim=1)
 
 
 class PointnetFPModule(nn.Module):
@@ -264,128 +372,6 @@ class PointnetFPModule(nn.Module):
         return new_features.squeeze(-1)
 
 
-class FlowEmbedding(nn.Module):
-    """Modified from https://github.com/hyangwinter/flownet3d_pytorch/blob/master/util.py"""
-
-    def __init__(self, radius, nsample, in_channel, mlp, pooling='max', corr_func='concat', knn=True):
-        super(FlowEmbedding, self).__init__()
-        self.radius = radius
-        self.nsample = nsample
-        self.knn = knn
-        self.pooling = pooling
-        self.corr_func = corr_func
-        self.mlp_convs = nn.ModuleList()
-        self.mlp_bns = nn.ModuleList()
-        if corr_func is 'concat':
-            last_channel = in_channel * 2 + 3
-        for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1, bias=False))
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
-
-    def forward(self, xyz1, xyz2, feature1, feature2):
-        """
-        Input:
-            xyz1: (batch_size, npoint, 3)
-            xyz2: (batch_size, npoint, 3)
-            feat1: (batch_size, channel, npoint)
-            feat2: (batch_size, channel, npoint)
-        Output:
-            xyz1: (batch_size, npoint, 3)
-            feat1_new: (batch_size, mlp[-1], npoint)
-        """
-        xyz1_t = xyz1.permute(0, 2, 1).contiguous()
-        xyz2_t = xyz2.permute(0, 2, 1).contiguous()
-        # feature1 = feature1.permute(0, 2, 1).contiguous()
-        # feature2 = feature2.permute(0, 2, 1).contiguous()
-
-        B, N, C = xyz1.shape
-        if self.knn:
-            idx = pointnet2_utils.knn_point(self.nsample, xyz1, xyz2)  # (B, npoint, nsample)
-        else:
-            idx, cnt = pointnet2_utils.ball_query(self.radius, self.nsample, xyz2, xyz1)  # (B, npoint, nsample)
-
-        xyz2_grouped = pointnet2_utils.grouping_operation(xyz2_t, idx)  # (B, 3, npoint, nsample)
-        pos_diff = xyz2_grouped - xyz1_t.view(B, -1, N, 1)  # (B, 3, npoint, nsample)
-
-        feat2_grouped = pointnet2_utils.grouping_operation(feature2, idx)  # [B, C, npoint, nsample]
-        if self.corr_func == 'concat':
-            feat_diff = torch.cat([feat2_grouped, feature1.view(B, -1, N, 1).repeat(1, 1, 1, self.nsample)], dim=1)
-
-        feat1_new = torch.cat([pos_diff, feat_diff], dim=1)  # [B, 2*C+3,npoint, nsample]
-        for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
-            feat1_new = F.relu(bn(conv(feat1_new)))
-
-        feat1_new = torch.max(feat1_new, -1)[0]  # [B, mlp[-1], npoint]
-        return xyz1, feat1_new
-
-
-class PointNetSetUpConv(nn.Module):
-    def __init__(self, nsample, radius, f1_channel, f2_channel, mlp, mlp2, knn=True):
-        super(PointNetSetUpConv, self).__init__()
-        self.nsample = nsample
-        self.radius = radius
-        self.knn = knn
-        self.mlp1_convs = nn.ModuleList()
-        self.mlp2_convs = nn.ModuleList()
-        last_channel = f2_channel + 3
-        for out_channel in mlp:
-            self.mlp1_convs.append(nn.Sequential(nn.Conv2d(last_channel, out_channel, 1, bias=False),
-                                                 nn.BatchNorm2d(out_channel),
-                                                 nn.ReLU(inplace=False)))
-            last_channel = out_channel
-        if len(mlp) is not 0:
-            last_channel = mlp[-1] + f1_channel
-        else:
-            last_channel = last_channel + f1_channel
-        for out_channel in mlp2:
-            self.mlp2_convs.append(nn.Sequential(nn.Conv1d(last_channel, out_channel, 1, bias=False),
-                                                 nn.BatchNorm1d(out_channel),
-                                                 nn.ReLU(inplace=False)))
-            last_channel = out_channel
-
-    def forward(self, xyz1, xyz2, feature1, feature2):
-        """
-            Feature propagation from xyz2 (less points) to xyz1 (more points)
-        Inputs:
-            xyz1: (batch_size, npoint1, 3)
-            xyz2: (batch_size, npoint2, 3)
-            feat1: (batch_size, channel1, npoint1) features for xyz1 points (earlier layers)
-            feat2: (batch_size, channel2, npoint2) features for xyz2 points
-        Output:
-            feat1_new: (batch_size, mlp[-1] or mlp2[-1] or channel1+3, npoint2)
-            TODO: Add support for skip links. Study how delta(XYZ) plays a role in feature updating.
-        """
-        xyz1_t = xyz1.permute(0, 2, 1).contiguous()
-        xyz2_t = xyz2.permute(0, 2, 1).contiguous()
-        # feature1 = feature1.permute(0, 2, 1).contiguous()
-        # feature2 = feature2.permute(0, 2, 1).contiguous()
-        B, C, N = xyz1_t.shape
-        if self.knn:
-            idx = pointnet2_utils.knn_point(self.nsample, xyz1, xyz2)  # (B, npoint1, nsample)
-        else:
-            idx, cnt = pointnet2_utils.ball_query(self.radius, self.nsample, xyz2, xyz1)  # (B, npoint1, nsample)
-
-        xyz2_grouped = pointnet2_utils.grouping_operation(xyz2_t, idx)
-        pos_diff = xyz2_grouped - xyz1_t.view(B, -1, N, 1)  # [B,3,N1,S]
-
-        feat2_grouped = pointnet2_utils.grouping_operation(feature2, idx)
-        feat_new = torch.cat([feat2_grouped, pos_diff], dim=1)  # [B,C1+3,N1,S]
-        for conv in self.mlp1_convs:
-            feat_new = conv(feat_new)
-        # max pooling
-        feat_new = feat_new.max(-1)[0]  # [B,mlp1[-1],N1]
-        # concatenate feature in early layer
-        if feature1 is not None:
-            feat_new = torch.cat([feat_new, feature1], dim=1)
-        # feat_new = feat_new.view(B,-1,N,1)
-        for conv in self.mlp2_convs:
-            feat_new = conv(feat_new)
-
-        return feat_new
-
-
 if __name__ == "__main__":
     from torch.autograd import Variable
 
@@ -399,13 +385,6 @@ if __name__ == "__main__":
     )
     test_module.cuda()
     print(test_module(xyz, xyz_feats))
-
-    #  test_module = PointnetFPModule(mlp=[6, 6])
-    #  test_module.cuda()
-    #  from torch.autograd import gradcheck
-    #  inputs = (xyz, xyz, None, xyz_feats)
-    #  test = gradcheck(test_module, inputs, eps=1e-6, atol=1e-4)
-    #  print(test)
 
     for _ in range(1):
         _, new_features = test_module(xyz, xyz_feats)
